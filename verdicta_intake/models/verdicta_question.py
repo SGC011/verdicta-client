@@ -187,9 +187,9 @@ class VerdictaQuestion(models.Model):
             aggregates=["__count", "answered_at:max"],
         )
         by_qid = {}
-        for row in grouped:
-        qid = row.get( question_id, [0])[0] if row.get(question_id) else 0
-            by_qid[qid] = (row[__count], row.get(answered_at) or False)
+        for grouped_question, count, last_answered in grouped:
+            if grouped_question:
+                by_qid[grouped_question.id] = (count, last_answered or False)
         for question in self:
             count, last = by_qid.get(question.id, (0, False))
             question.answered_count = count
