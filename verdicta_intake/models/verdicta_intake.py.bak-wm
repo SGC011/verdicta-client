@@ -1,0 +1,1294 @@
+import json
+import logging
+import secrets
+
+from odoo import _, api, fields, models
+from odoo.exceptions import UserError
+
+_logger = logging.getLogger(__name__)
+
+# Long enough that guessing is hopeless, short enough to paste into an email.
+ACCESS_CODE_BYTES = 10  # 20 hex chars = 80 bits
+
+# Client uploads. The engagement cannot be reconciled without the bank
+# statements, so that slot is required; everything else is a convenience.
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_UPLOAD_TOTAL = 20
+ALLOWED_UPLOAD_EXT = (
+    "pdf", "jpg", "jpeg", "png", "heic", "xlsx", "xls", "csv", "docx", "txt",
+)
+# The desk, as the client and the stakeholders see it.
+DESK_EMAIL = "info@sgctech.ai"
+DESK_CC = "bran@sgctech.ai"
+# (key, label, required, max files, help) - order is the order on the form.
+DOCUMENT_SLOTS = [
+    ("bank", "Bank statements", True, 12,
+     "Monthly statements for every account. We cannot reconcile the ledger "
+     "without these, so this slot is required."),
+    ("payroll", "Payroll / WPS reports", False, 6,
+     "Salary files, WPS submissions or payroll reports for the period."),
+    ("vat", "VAT documents", False, 6,
+     "Returns, notices or correspondence with the Federal Tax Authority."),
+    ("client", "Client invoices / receipts", False, 8,
+     "Sales invoices and payment receipts you can share."),
+    ("supplier", "Supplier invoices / bills", False, 8,
+     "Purchase invoices and bills from your suppliers."),
+    ("employment", "Employment contracts", False, 8,
+     "Offer letters, contracts and end-of-service certificates."),
+    ("accounts", "Previous year accounts", False, 6,
+     "Last year's accounts, if they were prepared."),
+    ("other", "Other documents", False, 8,
+     "Anything else that helps us close your file faster."),
+]
+
+# Hard ceiling on how many times one submission can be posted per hour.
+MAX_SUBMITS_PER_HOUR = 12
+
+# Answers shorter than this are treated as "not answered" for the purpose of
+# auto-closing a question, so an accidental space does not close it.
+MEANINGFUL_MIN = 1
+
+
+def _code():
+    return secrets.token_hex(ACCESS_CODE_BYTES).upper()
+
+
+class VerdictaIntake(models.Model):
+    """One client's private intake.
+
+    Created when the client is invited (state ``draft``), becomes
+    ``submitted`` the first time they post the form, and collects further
+    answers on every later visit.
+    """
+
+    _name = "verdicta.intake"
+    _description = "Verdicta Intake Submission"
+    _order = "create_date desc, id desc"
+    _rec_name = "reference"
+
+    reference = fields.Char(
+        string="Reference",
+        required=True,
+        copy=False,
+        readonly=True,
+        default=lambda self: _("New"),
+        index=True,
+    )
+    access_code = fields.Char(
+        string="Access code",
+        required=True,
+        copy=False,
+        readonly=True,
+        default=lambda self: _code(),
+        index=True,
+        help="Private code for this client. It is the only thing that grants "
+             "access to their form.",
+    )
+    state = fields.Selection(
+        selection=[
+            ("draft", "Invited - not yet submitted"),
+            ("submitted", "Submitted"),
+            ("closed", "Closed - fully answered"),
+        ],
+        required=True,
+        default="draft",
+        readonly=True,
+        copy=False,
+    )
+    company_id = fields.Many2one(
+        comodel_name="res.company",
+        string="Company",
+        required=True,
+        default=lambda self: self.env.company,
+        index=True,
+        readonly=True,
+        copy=False,
+    )
+
+    # ---- who it is for ----------------------------------------------
+    practice_name = fields.Char(string="Practice / legal entity")
+    contact_name = fields.Char(string="Main contact")
+    contact_email = fields.Char(string="Contact email")
+    contact_phone = fields.Char(string="Contact mobile")
+    period_start = fields.Date(string="Period start")
+    period_end = fields.Date(string="Period end")
+
+    # ---- state ------------------------------------------------------
+    invited_at = fields.Datetime(
+        string="Invited",
+        default=fields.Datetime.now,
+        readonly=True,
+    )
+    submitted_at = fields.Datetime(
+        string="First submitted",
+        readonly=True,
+        copy=False,
+    )
+    last_submitted_at = fields.Datetime(
+        string="Last submitted",
+        readonly=True,
+        copy=False,
+    )
+    submit_count = fields.Integer(
+        string="Submissions",
+        default=0,
+        readonly=True,
+        copy=False,
+    )
+    last_submit_ip = fields.Char(
+        string="Last IP",
+        readonly=True,
+        copy=False,
+    )
+
+    # ---- results ----------------------------------------------------
+    answer_ids = fields.One2many(
+        comodel_name="verdicta.answer",
+        inverse_name="intake_id",
+        string="Answers",
+        readonly=True,
+    )
+    answered_question_ids = fields.Many2many(
+        comodel_name="verdicta.question",
+        relation="verdicta_intake_question_rel",
+        column1="intake_id",
+        column2="question_id",
+        string="Answered questions",
+        compute="_compute_answered_question_ids",
+    )
+    open_question_ids = fields.Many2many(
+        comodel_name="verdicta.question",
+        string="Still outstanding",
+        compute="_compute_open_question_ids",
+    )
+    outstanding_required = fields.Integer(
+        string="Required items outstanding",
+        compute="_compute_outstanding_required",
+        store=True,
+        help="Stored so it can be filtered in the submissions list. Kept "
+             "current by _compute_open_question_ids and, for other clients, "
+             "explicitly recomputed whenever a question is resolved.",
+    )
+    progress_pct = fields.Integer(
+        string="Progress %",
+        compute="_compute_open_question_ids",
+    )
+    pdf_attachment_id = fields.Many2one(
+        comodel_name="ir.attachment",
+        string="Latest PDF",
+        readonly=True,
+        copy=False,
+    )
+    notified = fields.Boolean(
+        string="Notified SGC",
+        readonly=True,
+        copy=False,
+        help="Untick to send the notification email again.",
+    )
+    note = fields.Text(
+        string="Internal note",
+        help="For the Verdicta / SGC team only.",
+    )
+
+    _access_code_unique = models.Constraint(
+        "unique(access_code)",
+        "Two submissions cannot share an access code. Reissue the code on one "
+        "of them.",
+    )
+
+    # ------------------------------------------------------------------
+    @api.model_create_multi
+    def create(self, vals_list):
+        records = super().create(vals_list)
+        for rec in records:
+            if not rec.reference or rec.reference == _("New"):
+                rec.reference = rec._next_reference()
+        return records
+
+    @api.model
+    def _next_reference(self):
+        year = fields.Date.today().year
+        prefix = "VIN-%d-" % year
+        last = self.sudo().search(
+            [("reference", "=like", prefix + "%")],
+            order="reference desc", limit=1,
+        )
+        seq = int(last.reference[len(prefix):]) + 1 if last else 1
+        return "%s%04d" % (prefix, seq)
+
+    @api.depends("answer_ids.question_id")
+    def _compute_answered_question_ids(self):
+        for intake in self:
+            intake.answered_question_ids = intake.answer_ids.mapped("question_id")
+
+    def _compute_open_question_ids(self):
+        """Work out what is still unanswered and how far along the client is.
+
+        Note the two different denominators, which matters because a question
+        disappears from the form as soon as it is answered:
+          * open_question_ids drives the form, so it is relative to what is
+            still on offer;
+          * progress_pct is relative to every live question, so the bar does
+            not jump back to 100% every time a question closes.
+        """
+        Question = self.env["verdicta.question"].sudo()
+        open_qs = Question.open_input_questions()
+        total = Question.search_count([("state", "!=", "retired")])
+        for intake in self:
+            answered = intake.answer_ids.mapped("question_id")
+            intake.open_question_ids = open_qs - answered
+            intake.progress_pct = (
+                100 if not total else int(round(len(answered) * 100.0 / total))
+            )
+
+    @api.depends("answer_ids.question_id")
+    def _compute_outstanding_required(self):
+        Question = self.env["verdicta.question"].sudo()
+        required_open = Question.open_input_questions().filtered("required")
+        for intake in self:
+            answered = intake.answer_ids.mapped("question_id")
+            intake.outstanding_required = len(required_open - answered)
+
+    def _refresh_outstanding_everywhere(self):
+        """Refresh the stored outstanding count on every open intake.
+
+        Resolving a question is a global change, so other clients' counts shift
+        too. Previously this recomputed across every intake and wrote every row
+        on every submission, which made two concurrent POSTs of the same form
+        contend for the same question rows and fail with a serialization error.
+
+        The recompute is now scoped to intakes that are still open, and it
+        writes only the stored counter. Closed intakes are skipped because
+        their count can no longer change.
+        """
+        self = self.sudo()
+        if not self:
+            return
+        self.env["verdicta.question"].invalidate_model(
+            ["state"], flush=True
+        )
+        open_intakes = self.search([("state", "in", ("draft", "submitted"))])
+        if not open_intakes:
+            return
+        open_intakes._compute_outstanding_required()
+
+    def _retry_on_conflict(self, func, *args, **kwargs):
+        """Run func, retrying if PostgreSQL rolls the transaction back.
+
+        A double submit is harmless - the answers are written by question id,
+        so a second pass overwrites rather than duplicates. The only real
+        failure mode is two transactions touching the same rows at once.
+        """
+        import psycopg2
+
+        attempts = 3
+        for n in range(attempts):
+            try:
+                return func(*args, **kwargs)
+            except psycopg2.errors.SerializationFailure:
+                if n == attempts - 1:
+                    raise
+                # The transaction is dead. Roll back to a clean state, drop
+                # cached values and try the whole submission again.
+                self.env.cr.rollback()
+                self.env.invalidate_all()
+
+    # ------------------------------------------------------------------
+    # public URL
+    # ------------------------------------------------------------------
+    def _public_url(self):
+        self.ensure_one()
+        base = (
+            self.env["ir.config_parameter"]
+            .sudo()
+            .get_param("web.base.url", "")
+        ).rstrip("/")
+        if not base or base.startswith("http://localhost"):
+            base = "https://verdicta.sgctech.ai"
+        return "%s/onboarding/%s" % (base, self.access_code)
+
+    # ------------------------------------------------------------------
+    # capture
+    # ------------------------------------------------------------------
+    def rate_limited(self):
+        """True when this submission has been posted too often recently."""
+        self.ensure_one()
+        from datetime import timedelta
+        cutoff = fields.Datetime.now() - timedelta(hours=1)
+        recent = self.env["verdicta.attempt"].sudo().search_count([
+            ("ip", "=", self.last_submit_ip or ""),
+            ("route", "=", "form"),
+            ("success", "=", True),
+            ("create_date", ">=", cutoff),
+        ])
+        return recent >= MAX_SUBMITS_PER_HOUR
+
+    def pending_answer_changes(self, post):
+        """Questions whose posted answer differs from what is on file.
+
+        Read-only, so the controller can find out whether a save changes
+        anything *before* writing or sending anything. Mirrors the rules in
+        ``_apply_submission``: a blank or unticked box is not a change, and
+        a value equal to the stored one is not a change either.
+        """
+        self.ensure_one()
+        Answer = self.env["verdicta.answer"]
+        pending = self.env["verdicta.question"]
+        for question in self.env["verdicta.question"].open_input_questions():
+            field_name = question.input_name()
+            if field_name not in post:
+                continue
+            text, joined = Answer._render_value(question, post.get(field_name))
+            if not text:
+                continue
+            existing = self.answer_ids.filtered(
+                lambda a, q=question: a.question_id == q)[:1]
+            if existing:
+                if (existing.value == text
+                        and (existing.values_list or "") == (joined or "")
+                        and (existing.known_display or "")
+                        == (question.known_display() or "")):
+                    continue
+            pending |= question
+        return pending
+
+    def apply_submission(self, post, ip=None, signed=False, touched=False):
+        """Capture a submission, retrying cleanly on serialization conflict.
+
+        ``signed`` tells the model that a valid signature is coming with
+        this save, so a complete submission can close in the same pass.
+        """
+        return self._retry_on_conflict(
+            self._apply_submission, post, ip=ip, signed=signed, touched=touched)
+
+    def _apply_submission(self, post, ip=None, signed=False, touched=False):
+        """Record a client submission.
+
+        Only questions that are currently ``open`` are considered, so a
+        question that was retired or auto-closed while the page sat open in
+        the client's browser cannot be written back.
+
+        ``closed_questions`` is always empty now: questions are never closed
+        by answering, so nothing is returned there. The tuple shape is kept
+        for the callers and the tests.
+
+        :return: (saved_answers, closed_questions, errors, stored_count)
+        """
+        self.ensure_one()
+        Question = self.env["verdicta.question"].sudo()
+        Answer = self.env["verdicta.answer"].sudo()
+        post = post or {}
+
+        if self.rate_limited():
+            # Same shape as the success return: values, closed, errors, stored.
+            return [], self.env["verdicta.question"], [
+                _("Too many submissions from this connection. Please try "
+                  "again later.")
+            ], 0
+
+        open_by_name = {}
+        for question in Question.open_input_questions():
+            open_by_name[question.input_name()] = question
+
+        submit_no = self.submit_count + 1
+        now = fields.Datetime.now()
+        values, closed, errors, stored = [], self.env["verdicta.question"], [], 0
+
+        for field_name, question in open_by_name.items():
+            if field_name not in post:
+                continue
+            raw = post.get(field_name)
+            text, joined = Answer._render_value(question, raw)
+            if not text:
+                # Blank or un-ticked: leave the question open.
+                continue
+
+            existing = Answer.search([
+                ("intake_id", "=", self.id),
+                ("question_id", "=", question.id),
+            ], limit=1)
+            vals = {
+                "question_label": question.label,
+                "question_text": question.name,
+                "section": question.section,
+                "known_display": question.known_display() or "",
+                "value": text,
+                "values_list": joined,
+                "answered_at": now,
+                "submit_no": submit_no,
+                "submit_ip": ip or "",
+            }
+            if existing:
+                # Re-saving the same answer is not a change: leave the
+                # snapshot, its timestamp and the save counter alone so a
+                # click on Save with nothing edited changes nothing.
+                if (existing.value == text
+                        and (existing.values_list or "") == (joined or "")
+                        and (existing.known_display or "")
+                        == (vals["known_display"] or "")):
+                    continue
+                existing.write(vals)
+                stored += 1
+            else:
+                values.append(dict(vals, intake_id=self.id, question_id=question.id))
+
+            # No global closure here. A question is finished for THIS intake
+            # once it has an answer, and the form already hides what this
+            # intake has answered. Closing the question record itself would
+            # hide it from every other client's form, so only the desk can do
+            # that, from the question list.
+
+        if values:
+            Answer.create(values)
+            stored += len(values)
+
+        # Validate required questions *after* closing, so a question the
+        # client has just answered never counts against them.
+        answered_qids = self.answer_ids.mapped("question_id")
+        still_required = Question.open_input_questions().filtered(
+            lambda q: q.required and q not in answered_qids
+        )
+        for question in still_required:
+            errors.append(
+                _("%(label)s is still required.") % {"label": question.label}
+            )
+
+        # Nothing new on the form: leave the record exactly as it is. No
+        # save counter, no timestamp, no state change - the click is a
+        # no-op and the caller sends nothing. ``touched`` covers a save that
+        # carried only documents or a new signature: the answers are
+        # unchanged, but the submission did move, so it is stamped and
+        # notified like any other save.
+        if not (stored or closed or touched):
+            return values, closed, errors, 0
+
+        remaining = Question.open_input_questions() - answered_qids
+        complete = not remaining
+        # A submission only closes once every required question is answered
+        # *and* it carries a signature. A signature posted with this save
+        # counts, because it is stamped a moment later.
+        can_close = complete and (self.is_signed or signed)
+        if can_close and self._missing_required_documents():
+            # Everything is answered, but we cannot reconcile a ledger we
+            # have never seen the bank statements for.
+            errors.append(_(
+                "Your bank statements are still missing, so this submission "
+                "cannot close yet. Please upload them on the form."
+            ))
+            can_close = False
+        if self.state == "draft":
+            new_state = "submitted"
+        elif can_close:
+            new_state = "closed"
+        else:
+            new_state = self.state
+
+        if complete and not can_close:
+            errors.append(
+                _("Everything is answered. Please sign the submission so it "
+                  "can be closed.")
+            )
+
+        self.write({
+            "state": new_state,
+            "submitted_at": self.submitted_at or now,
+            "last_submitted_at": now,
+            "submit_count": submit_no,
+            "last_submit_ip": ip or self.last_submit_ip,
+        })
+        # Only this intake's counter can have moved.
+        self._compute_outstanding_required()
+
+        return values, closed, errors, stored
+
+    # ------------------------------------------------------------------
+    # Signature - proof of who submitted
+    #
+    # Inherits the digital-signing pattern used on quotations
+    # (sale_agreement_report: client/provider signer name + date) and adds
+    # the signature image, the capture trail and a digest that binds the
+    # signature to the exact answers it was signed for.
+    # ------------------------------------------------------------------
+    signature = fields.Binary(
+        string="Signature",
+        attachment=True,
+        help="PNG of the submitter's signature, captured on the intake form "
+             "and stamped on the submission record and its answers.",
+    )
+    signature_svg = fields.Text(
+        string="Signature (vector)",
+        help="SVG path data of the signature, drawn on the intake form. "
+             "The PDF stamps this instead of the image: the PDF engine will "
+             "not load images from this tenant, but it renders inline "
+             "vector paths, and a signature stays sharp at any size.",
+    )
+    new_questions_notified_at = fields.Datetime(
+        string="New questions notified",
+        help="When the client and the desk were last told about new "
+             "questions on this intake, so nobody is chased twice.",
+    )
+    signed_by = fields.Char(string="Signed by")
+    signed_on = fields.Datetime(string="Signed on")
+    signature_ip = fields.Char(
+        string="Signed from",
+        help="IP address the signature was captured from, for the audit trail.",
+    )
+    client_signer_name = fields.Char(
+        string="Client Signer Name",
+        help="Name of the person who signed on behalf of the client.",
+    )
+    client_signer_role = fields.Char(
+        string="Client Signer Role",
+        help="Role or authority of the signer, e.g. Manager or Director.",
+    )
+    client_sign_date = fields.Date(string="Client Signature Date")
+    provider_signer_name = fields.Char(
+        string="Provider Signer Name",
+        default="SGC TECH AI - Authorized Representative",
+    )
+    provider_sign_date = fields.Date(string="Provider Signature Date")
+    authority_confirmed = fields.Boolean(
+        string="Authority Confirmed",
+        help="The signer confirmed they are authorised to submit for the practice.",
+    )
+    signing_digest = fields.Char(
+        string="Signing Digest",
+        help="SHA-256 over the answers as they stood when signed. It stops "
+             "matching if any answer is edited afterwards, which makes a "
+             "post-signature change visible.",
+    )
+    signed_answer_count = fields.Integer(
+        string="Answers at Signing",
+        help="How many answers the digest covers.",
+    )
+    is_signed = fields.Boolean(string="Signed", compute="_compute_is_signed")
+
+    @api.depends("signature", "signed_by", "client_signer_name")
+    def _compute_is_signed(self):
+        for intake in self:
+            intake.is_signed = bool(
+                intake.signature or intake.signed_by or intake.client_signer_name
+            )
+
+    # ------------------------------------------------------------------
+    # PDF
+    # ------------------------------------------------------------------
+    def action_generate_pdf(self):
+        """Render (or re-render) the A4 PDF and return the attachment."""
+        self.ensure_one()
+        # Resolve the ir.actions.report record, not the QWeb view: env.ref on
+        # the template xmlid returns an ir.ui.view, which has no report_name.
+        report = self.env.ref("verdicta_intake.report_verdicta_intake")
+        # Odoo 19 silently downgrades report rendering to HTML whenever
+        # test_enable is on unless this flag is set, which would store HTML
+        # under a .pdf name. Ask for the real thing explicitly.
+        content, ext = self.env["ir.actions.report"].with_context(
+            force_report_rendering=True,
+        )._render_qweb_pdf(report.report_name, [self.id])
+        is_pdf = ext == "pdf"
+        suffix = "pdf" if is_pdf else "html"
+        mimetype = "application/pdf" if is_pdf else "text/html"
+        filename = "%s.%s" % (self.reference or self.id, suffix)
+        old = self.pdf_attachment_id
+        attachment = self.env["ir.attachment"].sudo().create({
+            "name": filename,
+            "raw": content,
+            "res_model": self._name,
+            "res_id": self.id,
+            "mimetype": mimetype,
+        })
+        if old:
+            old.unlink()
+        self.sudo().write({"pdf_attachment_id": attachment.id})
+        return attachment
+
+    # ------------------------------------------------------------------
+    # Signature
+    # ------------------------------------------------------------------
+    def _answers_digest(self):
+        """SHA-256 over the answers as they stand right now.
+
+        Recomputing this later must give the same value, so any edit made
+        after signing is detectable.
+        """
+        self.ensure_one()
+        import hashlib
+
+        digest = hashlib.sha256()
+        for answer in self.answer_ids.sorted(lambda a: a.id):
+            digest.update(("%s|%s|%s\n" % (
+                answer.question_id.id,
+                answer.value or "",
+                answer.known_display or "",
+            )).encode("utf-8"))
+        return digest.hexdigest()
+
+    def signature_data_uri(self):
+        """The stored signature as a data URI, for the form and the report."""
+        self.ensure_one()
+        if not self.signature:
+            return False
+        from odoo.tools.image import image_data_uri
+
+        return image_data_uri(self.signature)
+
+    def _signature_url(self):
+        """Absolute URL of the stored signature, for the report.
+
+        wkhtmltopdf does not embed data: URI images reliably, and the
+        renderer can reach the site over HTTP (it already loads the logo
+        that way), so the stamp points at a real URL instead. The route is
+        behind the intake access code, the same secret that opens the form.
+        """
+        self.ensure_one()
+        if not self.signature:
+            return False
+        return "%s/onboarding/%s/signature.png" % (
+            self.get_base_url(), self.access_code)
+
+    # ------------------------------------------------------------------
+    # Documents uploaded by the client
+    # ------------------------------------------------------------------
+    def _client_attachments(self):
+        """Files the client uploaded for this intake, newest first."""
+        return self.env["ir.attachment"].sudo().search([
+            ("res_model", "=", "verdicta.intake"),
+            ("res_id", "=", self.id),
+            ("res_field", "=", "documents"),
+        ], order="id desc")
+
+    @api.model
+    def document_slots(self):
+        """The upload slots offered on the form, in order.
+
+        Each slot is its own field on the form, so the client knows which
+        document goes where and we know exactly what is missing.
+        """
+        out = []
+        for key, label, required, maximum, help_text in DOCUMENT_SLOTS:
+            out.append({
+                "key": key,
+                "field": "documents_%s" % key,
+                "label": label,
+                "required": required,
+                "max": maximum,
+                "help": help_text,
+            })
+        return out
+
+    def _slot_attachments(self, label):
+        """What is already filed under one slot label."""
+        self.ensure_one()
+        return self._client_attachments().filtered(
+            lambda a: a.description == label
+        )
+
+    def _document_defect(self, name, size):
+        """Return a human reason the file cannot be stored, or None."""
+        clean = (name or "").split("/")[-1].replace("\\", "_").strip()
+        if not clean or clean in (".", ".."):
+            return _("That file has no name we can use.")
+        ext = clean.rsplit(".", 1)[-1].lower() if "." in clean else ""
+        if ext not in ALLOWED_UPLOAD_EXT:
+            return _(
+                "%(name)s is not a file type we can take. Please send PDF, "
+                "JPG, PNG, XLSX, CSV, DOCX or TXT."
+            ) % {"name": clean}
+        if size and int(size) > MAX_UPLOAD_BYTES:
+            return _(
+                "%(name)s is larger than the 10 MB limit. Please split it or "
+                "send a compressed PDF."
+            ) % {"name": clean}
+        if size and int(size) < 12:
+            return _("%(name)s looks empty.") % {"name": clean}
+        return None
+
+    def store_client_uploads(self, uploads_by_slot):
+        """Store what the client uploaded, slot by slot.
+
+        ``uploads_by_slot`` is ``{slot_key: [file, ...]}``. Nothing is
+        deleted on rejection, so a refused file stays in the client's
+        browser for another attempt. Every stored file is a change like
+        any other answer: it is signed, sealed and notified.
+        """
+        self.ensure_one()
+        problems = []
+        if not uploads_by_slot:
+            return self._client_attachments(), problems
+        slots = {s["key"]: s for s in self.document_slots()}
+        stored = self._client_attachments()
+        total_room = MAX_UPLOAD_TOTAL - len(stored)
+        for key, files in uploads_by_slot.items():
+            slot = slots.get(key)
+            if slot is None:
+                for f in files or []:
+                    if f and f.filename:
+                        problems.append(_(
+                            "We do not know where to file %s.") % f.filename)
+                continue
+            in_slot = len(
+                [a for a in stored if a.description == slot["label"]]
+            )
+            for item in files or []:
+                if not item or not getattr(item, "filename", None):
+                    continue
+                if in_slot >= slot["max"] or total_room <= 0:
+                    problems.append(_(
+                        "%(label)s: we can hold %(max)s file(s) there. Please "
+                        "email anything extra to %(desk)s."
+                    ) % {"label": slot["label"], "max": slot["max"],
+                         "desk": DESK_EMAIL})
+                    break
+                filename = item.filename.split("/")[-1]
+                # Re-sending the same file must not create a duplicate.
+                if any(a.name == filename for a in stored):
+                    problems.append(_(
+                        "%(name)s is already on this form, so we kept the copy "
+                        "we had.") % {"name": filename})
+                    continue
+                size = (getattr(item, "size", None)
+                        or getattr(item, "content_length", None) or 0)
+                defect = self._document_defect(filename, size)
+                if defect:
+                    problems.append(defect)
+                    continue
+                # FileStorage.read() is the portable way in; .stream is the
+                # fallback for versions that do not proxy it.
+                try:
+                    raw = item.read()
+                except Exception:  # noqa: BLE001
+                    raw = item.stream.read()
+                if len(raw) < 12:
+                    problems.append(_("%(name)s looks empty.")
+                                    % {"name": filename})
+                    continue
+                if len(raw) > MAX_UPLOAD_BYTES:
+                    problems.append(_(
+                        "%(name)s is larger than the 10 MB limit. Please "
+                        "split it or send a compressed PDF."
+                    ) % {"name": filename})
+                    continue
+                self.env["ir.attachment"].sudo().create({
+                    "name": filename,
+                    "raw": raw,
+                    "res_model": "verdicta.intake",
+                    "res_id": self.id,
+                    "res_field": "documents",
+                    "description": slot["label"],
+                    "mimetype": item.content_type
+                    or "application/octet-stream",
+                })
+                stored = self._client_attachments()
+                in_slot += 1
+                total_room -= 1
+        return stored, problems
+
+    def _missing_required_documents(self):
+        """Required slots that hold nothing, by label.
+
+        A file counts as a statement when it sits in the bank slot or when
+        its name says so, so a statement sent under another slot is not
+        treated as missing.
+        """
+        self.ensure_one()
+        required = [
+            (key, label) for key, label, is_required, _m, _h in DOCUMENT_SLOTS
+            if is_required
+        ]
+        stored = self._client_attachments()
+        missing = []
+        for key, label in required:
+            in_slot = [a for a in stored if a.description == label]
+            if in_slot:
+                continue
+            # Safety net: a statement recognisable by name counts too.
+            if any("bank statement" in (a.name or "").lower() for a in stored):
+                continue
+            missing.append(label)
+        return missing
+
+    def _documents_received(self):
+        """Grouped list for the record and the client page.
+
+        Attachments carry their slot label in ``description``; they are
+        returned in slot order, with anything unexpected last.
+        """
+        self.ensure_one()
+        Attachment = self.env["ir.attachment"]
+        grouped = {}
+        for att in self._client_attachments():
+            grouped.setdefault(att.description or "Other documents", Attachment)
+            grouped[att.description or "Other documents"] |= att
+        out = []
+        for _key, label, _req, _max, _h in DOCUMENT_SLOTS:
+            if grouped.get(label):
+                out.append((label, grouped.pop(label)))
+        for label in sorted(grouped):
+            out.append((label, grouped[label]))
+        return out
+
+    def _document_lines(self):
+        """Readable list of what arrived: [(name, slot, size)]."""
+        self.ensure_one()
+        out = []
+        for att in self._client_attachments():
+            size = att.file_size or 0
+            out.append((
+                att.name or "document",
+                att.description or "",
+                "%.0f KB" % (size / 1024.0) if size else "",
+            ))
+        return out
+
+    def _desk_mail_documents(self):
+        """Client documents to travel with the desk notification.
+
+        Capped so one large upload cannot make the email undeliverable; the
+        rest stay on the record and can be sent on from there.
+        """
+        self.ensure_one()
+        keep, total = self.env["ir.attachment"], 0
+        for doc in self._client_attachments():
+            size = doc.file_size or 0
+            if total + size > 20 * 1024 * 1024 or len(keep) >= 10:
+                _logger.info(
+                    "verdicta_intake: %s has more documents than fit in the "
+                    "email; sending the first %s", self.reference, len(keep))
+                break
+            keep |= doc
+            total += size
+        return keep
+
+    def _new_questions_since(self, stamp):
+        """Questions added to the bank after `stamp` that expect an answer."""
+        Question = self.env["verdicta.question"].sudo()
+        from .verdicta_question import INPUT_TYPES
+
+        domain = [
+            ("state", "=", "open"), ("active", "=", True),
+            ("field_type", "in", list(INPUT_TYPES)),
+        ]
+        if stamp:
+            domain += [("create_date", ">", stamp)]
+        return Question.search(domain, order="display_order, id")
+
+    def _notify_stakeholders(self, questions, stamp=None):
+        """Tell the client contact and the desk about questions to answer.
+
+        The client contact is the named person on the record - for Verdicta
+        that is Christina - so a question added at our end does not sit
+        unnoticed on a form nobody is watching.
+        """
+        self.ensure_one()
+        if not questions:
+            return False
+        labels = "".join(
+            "<li>%s</li>" % (q.label or q.name or "") for q in questions
+        )
+        link = "%s/onboarding/%s" % (self.get_base_url(), self.access_code)
+        body = """
+            <p>Hello,</p>
+            <p>We have added %d new question(s) to your intake form%s.</p>
+            <ul>%s</ul>
+            <p>You can answer them here:
+               <a href="%s">open your form</a>.</p>
+            <p style="font-size:12px;color:#5A6B7F;">
+              Reference %s &middot; %d required item(s) still outstanding.
+              Every save is signed and emailed to us, so you can answer in
+              as many goes as you like. Nothing is sent if you change
+              nothing.</p>
+        """ % (
+            len(questions),
+            " for %s" % (self.practice_name or self.contact_name or "you"),
+            labels, link, self.reference or "", self.outstanding_required,
+        )
+        recipients = [m.strip() for m in (self.contact_email or "").split(",")
+                      if m.strip()]
+        if not recipients:
+            return False
+        self.env["mail.mail"].sudo().create({
+            "subject": "[Verdicta intake] %s - %d new question(s) for you"
+            % (self.reference or "", len(questions)),
+            "body_html": body,
+            # The server only accepts mail from its own address, so the
+            # From is set explicitly rather than inherited.
+            "email_from": "SGC TECH AI <%s>" % DESK_EMAIL,
+            "email_to": ", ".join(recipients),
+            "email_cc": DESK_CC,
+            "author_id": self.env.ref("base.user_root").id,
+            "auto_delete": True,
+        }).send()
+        self.sudo().write({
+            "new_questions_notified_at": stamp or fields.Datetime.now(),
+        })
+        _logger.info(
+            "verdicta_intake: %s notified about %d new question(s) (%s)",
+            self.reference, len(questions), ", ".join(recipients))
+        return True
+
+    @api.model
+    def cron_notify_new_questions(self):
+        """Cron: tell each open client about questions added since last time."""
+        Intake = self.sudo()
+        for intake in Intake.search([("state", "in", ("draft", "submitted"))]):
+            # Without a baseline the whole bank would look new, so fall
+            # back to when the intake itself was opened.
+            stamp = (intake.new_questions_notified_at or intake.invited_at
+                     or intake.create_date)
+            fresh = intake._new_questions_since(stamp)
+            if fresh:
+                intake._notify_stakeholders(fresh)
+        return True
+
+    def _outstanding_questions(self):
+        """Required questions this intake has not answered, in form order.
+
+        Drives the "still needed from you" list on the record, so the desk
+        can see exactly what is outstanding rather than only how many.
+        """
+        self.ensure_one()
+        Question = self.env["verdicta.question"].sudo()
+        answered = self.answer_ids.mapped("question_id")
+        return Question.open_input_questions().filtered(
+            lambda q: q.required and q not in answered
+        )
+
+    def signing_seal_status(self):
+        """Live check that the answers still match the signed seal.
+
+        Empty when unsigned. If an answer is edited after signing the seal
+        no longer matches and the record says so, which is the whole point
+        of sealing the answers with the signature.
+        """
+        self.ensure_one()
+        if not self.signing_digest:
+            return ""
+        if self.signing_digest == self._answers_digest():
+            return "Matches the answers on file"
+        return "CHANGED AFTER SIGNING - the answers no longer match the seal"
+
+    def signing_seal_display(self):
+        """One-line seal printed on the record and in the desk email."""
+        self.ensure_one()
+        if not self.signing_digest:
+            return False
+        return "%s answers, sealed at signing, SHA-256 %s" % (
+            self.signed_answer_count or 0, self.signing_digest[:32])
+
+    @api.model
+    def _decode_signature_png(self, raw):
+        """Validate a canvas data URL and return the PNG bytes.
+
+        Returns ``b""`` when nothing usable was sent, so a signature is
+        never half-applied.
+        """
+        if not raw:
+            return b""
+        import base64
+
+        value = raw.strip()
+        if value.startswith("data:"):
+            _, _, value = value.partition(",")
+        try:
+            data = base64.b64decode(value, validate=True)
+        except Exception:  # noqa: BLE001
+            raise UserError(_("The signature could not be read. Please sign again."))
+        if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise UserError(_("The signature has to be a drawn signature. "
+                              "Please sign in the box."))
+        if len(data) > 400 * 1024:
+            raise UserError(_("That signature image is too large. Please sign again."))
+        return data
+
+    @api.model
+    def _clean_signature_svg(self, raw):
+        """Reduce client-supplied path data to drawing characters only.
+
+        The value is rendered straight into the report, and it arrives from
+        the public form, so anything that is not a path command, a number or
+        a separator is dropped.
+        """
+        if not raw:
+            return False
+        import re
+
+        cleaned = re.sub(r"[^MLCQSTAZmlcqstaz0-9,.\- ]", "", str(raw))
+        return cleaned[:20000] or False
+
+    def signature_needs_update(self, name, role=None, signature_png=b"",
+                               signature_svg=""):
+        """True when the signature posted on the form differs from the file.
+
+        Only data the client actually re-entered is compared, so reopening
+        the form and saving untouched never counts as a new signature.
+        """
+        self.ensure_one()
+        if not self.is_signed:
+            return True
+        name = (name or "").strip()
+        if name and name != (self.client_signer_name or ""):
+            return True
+        role = (role or "").strip()
+        if role and role != (self.client_signer_role or ""):
+            return True
+        svg = self._clean_signature_svg(signature_svg)
+        if svg and svg != (self.signature_svg or ""):
+            return True
+        if signature_png and signature_png != (self.signature or b""):
+            return True
+        return False
+
+    def action_sign_submission(self, name, role=None, signature_png=b"",
+                              signature_svg="", ip=None, authority=False):
+        """Stamp this submission with the signer's signature.
+
+        The signature is bound to the answers through ``signing_digest``:
+        edit an answer afterwards and the digest stops matching, so the
+        record shows it was altered after signing.
+        """
+        self.ensure_one()
+        name = (name or "").strip()
+        if not name:
+            raise UserError(_("Please give the full name of the person signing."))
+        if not authority:
+            raise UserError(_("The signer has to confirm they are authorised "
+                              "to submit for the practice."))
+        values = {
+            "client_signer_name": name,
+            "client_signer_role": (role or "").strip(),
+            "client_sign_date": fields.Date.context_today(self),
+            "signed_by": name,
+            "signed_on": fields.Datetime.now(),
+            "signature_ip": ip or "",
+            "authority_confirmed": True,
+        }
+        if signature_png:
+            values["signature"] = signature_png
+        clean_svg = self._clean_signature_svg(signature_svg)
+        if clean_svg:
+            values["signature_svg"] = clean_svg
+        self.sudo().write(values)
+        self.sudo().write({
+            "signing_digest": self._answers_digest(),
+            "signed_answer_count": len(self.answer_ids),
+        })
+        _logger.info(
+            "verdicta_intake: %s signed by %s (%s answers, digest %s)",
+            self.reference, name, self.signed_answer_count,
+            (self.signing_digest or "")[:12],
+        )
+        return True
+
+    def action_clear_signature(self):
+        """Drop the signature so the record can be signed again."""
+        self.ensure_one()
+        self.sudo().write({
+            "signature": False,
+            "signature_svg": False,
+            "signed_by": False,
+            "signed_on": False,
+            "signature_ip": False,
+            "client_signer_name": False,
+            "client_signer_role": False,
+            "client_sign_date": False,
+            "authority_confirmed": False,
+            "signing_digest": False,
+            "signed_answer_count": 0,
+        })
+        return True
+
+    # ------------------------------------------------------------------
+    # PDF helpers
+    # ------------------------------------------------------------------
+    #: Bundled with the module so it renders for the public and for wkhtmltopdf
+    #: without needing read access to the company partner record.
+    LOGO_STATIC = "/verdicta_intake/static/src/img/verdicta_logo.png"
+
+    def _logo_url(self):
+        self.ensure_one()
+        # Absolute URL: wkhtmltopdf resolves relative sources against the
+        # temp-file location, so a bare path silently drops the logo.
+        return "%s%s" % (self.get_base_url(), self.LOGO_STATIC)
+
+    def _company_address(self):
+        self.ensure_one()
+        company = self.company_id
+        return ", ".join(
+            p for p in [company.street, company.city, company.country_id.name] if p
+        )
+
+    def is_signature_row(self, answer):
+        """True for the declaration row where the client signs.
+
+        The form asks for a signature as a written answer; the report has to
+        show the drawn signature itself there, not the typed name.
+        """
+        label = (answer.question_label or "").strip().lower()
+        return label in ("signature", "client signature", "signature (signed)")
+
+    def section_answer_rows(self):
+        """``(section_label, answer, is_first_of_section)`` rows for the PDF.
+
+        The report renders each section heading as a spanning row of the
+        first question table, so a heading can never be stranded at the
+        bottom of a page (the PDF engine only honours page-break-inside
+        on tables).
+        """
+        self.ensure_one()
+        rows = []
+        for label, records in self._answers_by_section():
+            for index, _answer in enumerate(records):
+                rows.append((label, _answer, index == 0))
+        return rows
+
+    def _answers_by_section(self):
+        """Answers grouped by section label, in the form's section order.
+
+        Only sections that actually have answers appear, so the PDF does not
+        carry empty headings for questions the client never reached.
+        """
+        self.ensure_one()
+        section_labels = dict(
+            self.env["verdicta.question"]._fields["section"].selection
+        )
+        order = [key for key, _label in self.env["verdicta.question"]._fields[
+            "section"].selection]
+        buckets = {}
+        for answer in self.answer_ids:
+            key = answer.section or ""
+            buckets.setdefault(key, self.env["verdicta.answer"])
+            buckets[key] |= answer
+        out = []
+        for key in order:
+            records = buckets.get(key)
+            if records:
+                out.append((section_labels.get(key, key), records))
+        # anything with an unknown section still gets printed, at the end
+        for key, records in buckets.items():
+            if key not in order:
+                out.append((section_labels.get(key, key or "Other"), records))
+        return out
+
+    # ------------------------------------------------------------------
+    # mail
+    # ------------------------------------------------------------------
+    def _notify_values(self, pdf=None):
+        self.ensure_one()
+        return {
+            "intake_url": self._public_url(),
+            "reference": self.reference,
+            "practice": self.practice_name or "",
+            "contact": self.contact_name or "",
+            "outstanding": self.outstanding_required,
+            "progress": self.progress_pct,
+        }
+
+    def _send(self, xmlid, email_values_extra=None, force_send=True):
+        self.ensure_one()
+        template = self.env.ref(xmlid, raise_if_not_found=False)
+        if not template:
+            _logger.warning("verdicta_intake: missing mail template %s", xmlid)
+            return self.env["mail.mail"]
+        email_values = dict(email_values_extra or {})
+        # force_send is a send_mail() argument in Odoo 19, not an email_values
+        # key: passing it in the dict raises "Invalid field 'force_send'".
+        return template.with_context(**self._notify_values()).send_mail(
+            self.id, email_values=email_values, force_send=force_send,
+        )
+
+    def action_send_invite(self):
+        for intake in self:
+            intake._send("verdicta_intake.mail_template_invite")
+        return True
+
+    def action_send_acknowledgement(self):
+        for intake in self:
+            pdf = intake.pdf_attachment_id or intake.action_generate_pdf()
+            intake._send(
+                "verdicta_intake.mail_template_ack",
+                {"attachment_ids": [(6, 0, [pdf.id])]},
+            )
+        return True
+
+    def action_notify_sgc(self):
+        """Email the completed submission to the SGC accounting desk."""
+        self.ensure_one()
+        pdf = self.pdf_attachment_id or self.action_generate_pdf()
+        attachments = [(6, 0, [pdf.id])]
+        csv = self._answers_csv()
+        for doc in self._desk_mail_documents():
+            attachments.append((4, doc.id))
+        if csv:
+            attachment = self.env["ir.attachment"].sudo().create({
+                "name": "%s-answers.csv" % self.reference,
+                "raw": csv.encode("utf-8-sig"),
+                "res_model": self._name,
+                "res_id": self.id,
+                "mimetype": "text/csv",
+            })
+            attachments.append((4, attachment.id))
+        self._send(
+            "verdicta_intake.mail_template_submission",
+            {"attachment_ids": attachments},
+        )
+        self.sudo().write({"notified": True})
+        return True
+
+    def _answers_csv(self):
+        """Flat CSV of the answers, for the accounting side."""
+        import csv
+        import io
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "Reference", "Submitted", "Section", "Question", "Answer",
+        ])
+        section_labels = dict(self.env["verdicta.question"]._fields[
+            "section"].selection)
+        for answer in self.answer_ids.sorted(lambda a: (a.section, a.id)):
+            writer.writerow([
+                self.reference or "",
+                (self.last_submitted_at or "").strftime("%Y-%m-%d %H:%M")
+                if self.last_submitted_at else "",
+                section_labels.get(answer.section, answer.section or ""),
+                answer.question_label or "",
+                answer.value or "",
+            ])
+        return buf.getvalue()
+
+    # ------------------------------------------------------------------
+    # actions
+    # ------------------------------------------------------------------
+    def action_reopen(self):
+        """Mint a fresh access code and re-invite."""
+        for intake in self:
+            intake.sudo().write({
+                "access_code": _code(),
+                "notified": False,
+            })
+            intake._send("verdicta_intake.mail_template_invite")
+        return True
+
+    def action_reset_answers(self):
+        for intake in self:
+            intake.answer_ids.unlink()
+            intake.sudo().write({
+                "state": "draft",
+                "submit_count": 0,
+                "submitted_at": False,
+                "last_submitted_at": False,
+                "notified": False,
+            })
+        return True
+
+    def action_close(self):
+        self.write({"state": "closed"})
+
+    def action_reopen_record(self):
+        self.write({"state": "submitted"})
+
+    def _check_access_code(self, code):
+        self.ensure_one()
+        return bool(code) and secrets.compare_digest(
+            (code or "").strip().upper(), self.access_code,
+        )

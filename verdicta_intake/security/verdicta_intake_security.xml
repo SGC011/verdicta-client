@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- View-only access to client submissions. Deliberately NOT implied by
+         base.group_user, so ordinary accounting staff cannot read client
+         answers even though they can log in. -->
+    <record id="group_verdicta_intake_user" model="res.groups">
+        <field name="name">Verdicta Intake - view submissions</field>
+        <field name="privilege_id" ref="account.res_groups_privilege_accounting"/>
+        <field name="comment">Read access to Verdicta client intake submissions and answers.</field>
+    </record>
+
+    <!-- Editing questions and inviting clients. -->
+    <record id="group_verdicta_intake_manager" model="res.groups">
+        <field name="name">Verdicta Intake - manage form and clients</field>
+        <field name="privilege_id" ref="account.res_groups_privilege_accounting"/>
+        <field name="implied_ids" eval="[(4, ref('group_verdicta_intake_user'))]"/>
+        <field name="comment">Add, edit, reorder and retire questions; invite clients; generate PDFs.</field>
+    </record>
+
+    <record id="verdicta_intake_rule_own_company" model="ir.rule">
+        <field name="name">Verdicta Intake: only this company's submissions</field>
+        <field name="model_id" ref="model_verdicta_intake"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+        <field name="groups" eval="[(4, ref('group_verdicta_intake_user'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="True"/>
+        <field name="perm_create" eval="True"/>
+        <field name="perm_unlink" eval="True"/>
+    </record>
+
+</odoo>

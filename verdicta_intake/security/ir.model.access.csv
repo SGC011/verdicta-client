@@ -1,0 +1,8 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_verdicta_question_user,verdicta.question user,model_verdicta_question,verdicta_intake.group_verdicta_intake_user,1,0,0,0
+access_verdicta_question_manager,verdicta.question manager,model_verdicta_question,verdicta_intake.group_verdicta_intake_manager,1,1,1,1
+access_verdicta_intake_user,verdicta.intake user,model_verdicta_intake,verdicta_intake.group_verdicta_intake_user,1,0,0,0
+access_verdicta_intake_manager,verdicta.intake manager,model_verdicta_intake,verdicta_intake.group_verdicta_intake_manager,1,1,1,1
+access_verdicta_answer_user,verdicta.answer user,model_verdicta_answer,verdicta_intake.group_verdicta_intake_user,1,0,0,0
+access_verdicta_answer_manager,verdicta.answer manager,model_verdicta_answer,verdicta_intake.group_verdicta_intake_manager,1,1,1,1
+access_verdicta_attempt_manager,verdicta.attempt manager,model_verdicta_attempt,verdicta_intake.group_verdicta_intake_manager,1,1,1,1

@@ -1,0 +1,325 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="paperformat_verdicta_intake" model="report.paperformat">
+        <field name="name">Verdicta Intake A4</field>
+        <field name="default" eval="False"/>
+        <field name="format">A4</field>
+        <field name="orientation">Portrait</field>
+        <field name="margin_top">24</field>
+        <field name="margin_bottom">18</field>
+        <field name="margin_left">14</field>
+        <field name="margin_right">14</field>
+        <field name="header_line" eval="False"/>
+        <field name="header_spacing">6</field>
+        <field name="dpi">96</field>
+    </record>
+
+    <record id="report_verdicta_intake" model="ir.actions.report">
+        <field name="name">Verdicta Intake Answers</field>
+        <field name="model">verdicta.intake</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">verdicta_intake.report_verdicta_intake_document</field>
+        <field name="report_file">verdicta_intake.report_verdicta_intake_document</field>
+        <field name="print_report_name">'%s \u2014 Client intake record' % (object.reference or 'Verdicta intake')</field>
+        <field name="binding_model_id" ref="model_verdicta_intake"/>
+        <field name="paperformat_id" ref="paperformat_verdicta_intake"/>
+        <field name="binding_type">report</field>
+    </record>
+
+    <template id="report_verdicta_intake_document">
+        <t t-call="web.html_container">
+            <t t-foreach="docs" t-as="o">
+                <div class="v-rpt article">
+                    <style>
+                        @page { size:A4 portrait; }
+                        * { box-sizing:border-box; }
+                        .v-rpt { font-family:Roboto, "Segoe UI", Arial, sans-serif;
+                                 font-size:9.4pt; color:#0B1220; line-height:1.45; }
+
+                        /* running header */
+                        .v-hdr { padding:4mm 0 2mm 0;
+                                 border-bottom:0.8pt solid #C9D2E3;
+                                 font-size:7.4pt; color:#5A6B7F; }
+                        .v-hdr td { border:0; padding:0; background:none; }
+                        .v-hdr .l { font-weight:700; letter-spacing:.06em;
+                                    text-transform:uppercase; color:#01123C; }
+                        .v-hdr .r { text-align:right; }
+                        /* running footer */
+                        .v-ftr { padding:2mm 0 5mm 0;
+                                 border-top:0.8pt solid #C9D2E3;
+                                 font-size:7.2pt; color:#5A6B7F; line-height:1.5; }
+                        .v-ftr td { border:0; padding:0; background:none;
+                                    vertical-align:top; }
+                        .v-ftr .r { text-align:right; white-space:nowrap;
+                                    padding-left:6mm; }
+
+                        /* masthead */
+                        table.v-mast { width:100%; border-collapse:collapse;
+                                       border-bottom:2.4px solid #01123C;
+                                       margin-bottom:11px; }
+                        table.v-mast td { border:0; vertical-align:middle; padding:0 0 7px 0; }
+                        td.v-logo-cell { width:19mm; }
+                        .v-logo { height:17mm; width:17mm;
+                                  -webkit-print-color-adjust:exact;
+                                  print-color-adjust:exact; }
+                        .v-mast-t { padding-right:8px; }
+                        .v-mast-t .t { font-size:11.2pt; font-weight:700;
+                                       letter-spacing:.02em; text-transform:uppercase;
+                                       color:#01123C; }
+                        .v-mast-t .d { font-size:7pt; color:#B79554; font-weight:700;
+                                       letter-spacing:.14em; text-transform:uppercase;
+                                       margin:2px 0; }
+                        .v-mast-t .s { font-size:7.4pt; color:#5A6B7F;
+                                       text-transform:uppercase; }
+                        .v-ref { text-align:right; font-size:7.4pt; color:#5A6B7F; }
+                        .v-ref b { display:block; font-size:8.4pt; color:#0B1220; }
+
+                        /* meta table */
+                        .v-meta { width:100%; border-collapse:collapse;
+                                  font-size:8.2pt; margin-bottom:11px; }
+                        .v-meta td { border:1px solid #C9D2E3; padding:4px 7px;
+                                     vertical-align:top; }
+                        .v-meta td.k { background:#F4F7FB; width:16%;
+                                       font-weight:600; color:#01123C; }
+                        .v-note { border:1px solid #E4D7AB; border-left:3px solid #B79554;
+                                  background:#FDF8EC; padding:7px 9px; font-size:8.4pt;
+                                  margin-bottom:11px; }
+                        .v-note b { color:#7A5C10; }
+
+                        /* sections */
+                        table.v-q { width:100%; border-collapse:collapse;
+                                    margin-bottom:6px; page-break-inside:avoid; }
+                        table.v-q td { border:1px solid #C9D2E3; padding:5px 7px;
+                                       vertical-align:top; }
+                        table.v-q td.q-h2 { border:0; background:#01123C; color:#fff;
+                                       padding:4.5px 8px; font-size:9.2pt;
+                                       font-weight:700; letter-spacing:.05em;
+                                       text-transform:uppercase; }
+                        table.v-sec { margin-top:13px; margin-bottom:9px; }
+.v-sigimg { width:56mm; height:14mm; }
+.v-sigsvg svg { width:56mm; height:14mm; display:block; }
+.v-sigcert { margin:7px 0 0 0; font-size:7.6pt; color:#5A6B7F; line-height:1.5; }
+                        table.v-q tr.q-h td { background:#F4F7FB; font-weight:600;
+                                              color:#01123C; font-size:7.4pt;
+                                              letter-spacing:.05em; text-transform:uppercase; }
+                        td.v-k { width:34%; }
+                        td.v-v { font-weight:600; }
+                        td.v-known { background:#FDF6E3; font-weight:400;
+                                     font-size:7.8pt; }
+                        .v-empty { font-size:8.4pt; color:#5A6B7F;
+                                   border:1px dashed #C9D2E3; border-radius:4px;
+                                   padding:9px; text-align:center; }
+                    </style>
+
+                    <div class="header">
+                        <style>
+                            .v-hdr { font-family:Roboto, "Segoe UI", Arial, sans-serif;
+                                     font-size:7.4pt; color:#5A6B7F;
+                                     padding:4mm 0 2mm 0;
+                                     border-bottom:0.8pt solid #C9D2E3; }
+                            .v-hdr table { width:100%; border-collapse:collapse; }
+                            .v-hdr td { border:0; padding:0; background:none;
+                                        vertical-align:bottom; }
+                            .v-hdr .l { font-weight:700; letter-spacing:.06em;
+                                        text-transform:uppercase; color:#01123C; }
+                            .v-hdr .r { text-align:right; }
+                        </style>
+                        <div class="v-hdr">
+                            <table style="width:100%; border-collapse:collapse;">
+                                <tr>
+                                    <td class="l">Client intake record</td>
+                                    <td class="r">
+                                        <span t-out="o.practice_name or o.contact_name or ''"/>
+                                        &#160;&#183;&#160;Ref <span t-out="o.reference or ''"/>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="footer">
+                        <style>
+                            .v-ftr { font-family:Roboto, "Segoe UI", Arial, sans-serif;
+                                     font-size:7.2pt; color:#5A6B7F; line-height:1.5;
+                                     padding:2mm 0 5mm 0;
+                                     border-top:0.8pt solid #C9D2E3; }
+                            .v-ftr table { width:100%; border-collapse:collapse; }
+                            .v-ftr td { border:0; padding:0; background:none;
+                                        vertical-align:top; }
+                            .v-ftr .r { text-align:right; white-space:nowrap;
+                                        padding-left:6mm; width:28mm; }
+                        </style>
+                        <div class="v-ftr">
+                            <table style="width:100%; border-collapse:collapse;">
+                                <tr>
+                                    <td>Verdicta is a client of SGC TECH AI. Confidential
+                                        &#8212; contains client intake answers. Prepared for
+                                        the accounting file. Not legal advice.<span t-if="o.is_signed"> Digitally signed - see the authorisation block.</span></td>
+                                    <td class="r">Issued <span t-out="(o.write_date or '').strftime('%d %b %Y') if o.write_date else ''"/></td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <table class="v-mast">
+                        <tr>
+                            <td class="v-logo-cell">
+                                <img class="v-logo" t-att-src="o._logo_url()" alt="Verdicta"/>
+                            </td>
+                            <td class="v-mast-t">
+                                <div class="t" t-out="o.company_id.name"/>
+                                <div class="d">Client intake record</div>
+                                <div class="s" t-out="o._company_address()"/>
+                            </td>
+                            <td class="v-ref">
+                                <b t-out="o.reference"/>
+                                Confidential
+                            </td>
+                        </tr>
+                    </table>
+
+                    <table class="v-meta">
+                        <tr>
+                            <td class="k">Client</td>
+                            <td><span t-out="o.practice_name or o.contact_name or '-'"/></td>
+                            <td class="k">Reference</td>
+                            <td><span t-out="o.reference"/></td>
+                        </tr>
+                        <tr>
+                            <td class="k">Contact</td>
+                            <td>
+                                <span t-out="o.contact_name or '-'"/>
+                                <span t-if="o.contact_email"> &#183; <span t-out="o.contact_email"/></span>
+                            </td>
+                            <td class="k">Period</td>
+                            <td>
+                                <span t-if="o.period_start or o.period_end"><span t-out="o.period_start and format_date(o.period_start) or '-'"/> to <span t-out="o.period_end and format_date(o.period_end) or '-'"/></span>
+                                <span t-if="not (o.period_start or o.period_end)">Not specified</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="k">Status</td>
+                            <td>
+                                <span t-if="o.state == 'closed'">Closed &#8212; all questions answered</span>
+                                <span t-elif="o.state == 'submitted'">Submitted</span>
+                                <span t-else="">Draft &#8212; not yet submitted</span>
+                            </td>
+                            <td class="k">Last saved</td>
+                            <td>
+                                <span t-if="o.last_submitted_at" t-field="o.last_submitted_at" t-options='{"widget":"datetime","format":"dd MMM yyyy HH:mm"}'/>
+                                <span t-if="not o.last_submitted_at">Not yet</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="k">Saves</td>
+                            <td><span t-out="o.submit_count"/></td>
+                            <td class="k">Outstanding</td>
+                            <td>
+                                <span t-if="o.outstanding_required"><span t-out="o.outstanding_required"/> required</span>
+                                <span t-if="not o.outstanding_required">None</span>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <div t-if="o.outstanding_required" class="v-note">
+                        <b><span t-out="o.outstanding_required"/> required item(s) still outstanding.</b>
+                        The client has been asked to complete these on the intake form; the
+                        form stays open until every required question is answered.
+                    </div>
+
+                    <t t-set="rows" t-value="o.section_answer_rows()"/>
+                    <div t-if="not rows" class="v-empty">
+                        No answers have been recorded yet.
+                    </div>
+
+                    <t t-foreach="rows" t-as="row">
+                        <table t-att-class="'v-q v-sec' if row[2] else 'v-q'">
+                            <tr t-if="row[2]">
+                                <td colspan="2" class="q-h2" t-out="row[0]"/>
+                            </tr>
+                            <tr class="q-h">
+                                <td class="v-k" t-out="row[1].question_label"/>
+                                <td class="v-v" t-out="row[1].value or '-'"/>
+                            </tr>
+                            <tr t-if="row[1].question_text">
+                                <td class="v-k" style="font-weight:400;color:#5A6B7F;">Asked</td>
+                                <td style="font-weight:400;" t-out="row[1].question_text"/>
+                            </tr>
+                            <tr t-if="row[1].known_display">
+                                <td class="v-k" style="font-weight:400;color:#5A6B7F;">Our records showed</td>
+                                <td class="v-known" t-out="row[1].known_display"/>
+                            </tr>
+                        </table>
+                    </t>
+                <table t-if="o.is_signed" class="v-q v-sec">
+                <tr>
+                <td colspan="2" class="q-h2">Authorisation &amp; signature</td>
+                </tr>
+                <tr class="q-h">
+                <td class="v-k">Signed by</td>
+                <td class="v-v">
+                <span t-out="o.client_signer_name"/>
+                <span t-if="o.client_signer_role"> &#8212; <span t-out="o.client_signer_role"/></span>
+                </td>
+                </tr>
+                <tr>
+                <td class="v-k" style="font-weight:400;color:#5A6B7F;">For</td>
+                <td style="font-weight:400;" t-out="o.company_id.name"/>
+                </tr>
+                <tr>
+                <td class="v-k" style="font-weight:400;color:#5A6B7F;">Authority</td>
+                <td style="font-weight:400;" t-out="'Confirmed: the signer is authorised to submit these answers on behalf of the practice.' if o.authority_confirmed else 'Not confirmed'"/>
+                </tr>
+                <tr>
+                <td class="v-k" style="font-weight:400;color:#5A6B7F;">Date signed</td>
+                <td style="font-weight:400;">
+                <span t-field="o.client_sign_date" t-options='{"widget":"date"}'/>
+                <span t-if="o.signed_on"> &#183; <span t-field="o.signed_on" t-options='{"widget":"datetime","format":"dd MMM yyyy HH:mm"}'/></span>
+                </td>
+                </tr>
+                <tr t-if="o.signature or o.signature_svg">
+                <td class="v-k" style="font-weight:400;color:#5A6B7F;">Signature</td>
+                <td style="font-weight:400;">
+                <div t-if="o.signature_svg" class="v-sigsvg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 170"
+preserveAspectRatio="xMinYMid meet" width="212" height="56">
+<rect x="0" y="0" width="640" height="170" fill="#ffffff"/>
+<path t-att-d="o.signature_svg" fill="none" stroke="#0B1220" stroke-width="3"
+stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+</div>
+<img t-if="not o.signature_svg and o.signature" class="v-sigimg" t-att-src="o._signature_url()" alt="Signature"/>
+                </td>
+                </tr>
+                <tr t-if="o.provider_signer_name">
+                <td class="v-k" style="font-weight:400;color:#5A6B7F;">Countersigned</td>
+                <td style="font-weight:400;">
+                <span t-out="o.provider_signer_name"/>
+                <span t-if="o.provider_sign_date"> &#183; <span t-field="o.provider_sign_date" t-options='{"widget":"date"}'/></span>
+                </td>
+                </tr>
+                <tr>
+                <td class="v-k" style="font-weight:400;color:#5A6B7F;">Seal</td>
+                <td style="font-weight:400;" t-out="o.signing_seal_display() or 'Not sealed'"/>
+                </tr>
+                <tr>
+                <td class="v-k" style="font-weight:400;color:#5A6B7F;">Seal check</td>
+                <td style="font-weight:400;" t-out="o.signing_seal_status() or 'Not sealed'"/>
+                </tr>
+                <tr>
+                <td class="v-k" style="font-weight:400;color:#5A6B7F;">Signed from</td>
+                <td style="font-weight:400;" t-out="o.signature_ip or 'Not recorded'"/>
+                </tr>
+                </table>
+                <div t-if="o.is_signed" class="v-sigcert">
+                Digitally signed. The seal above is computed from the answers themselves,
+                so an answer edited after signing no longer matches it and the change is
+                visible on the record.
+                </div>
+                </div>
+            </t>
+        </t>
+    </template>
+
+</odoo>

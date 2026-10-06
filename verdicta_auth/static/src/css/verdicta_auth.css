@@ -1,0 +1,195 @@
+/* Verdicta Auth Branding
+ *
+ * Auth-only extract of the SGC tenant theme (sgc_theme_aurum), retuned to the
+ * Verdicta mark: navy #01123C and gold #C4931C, both read off the supplied
+ * Verdicta logo.
+ *
+ * Shipped as plain CSS and linked directly from the login layout rather than
+ * registered in the manifest asset bundle: on this Odoo 19 build the manifest
+ * "assets" entry for this module never materialised into ir_asset, so the
+ * bundle served the page unstyled. A direct <link> is served straight from
+ * /verdicta_auth/static/ and cannot be affected by bundle caching.
+ *
+ * Deliberate deviation from the tenant theme: the display face is a system
+ * serif stack rather than a Google-hosted webfont. A law firm collecting
+ * client details should not leak visitor IPs to a third-party font CDN, so
+ * nothing here makes an external request.
+ */
+
+.verdicta-auth-shell {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    background: linear-gradient(135deg, #01123C 0%, #0e2a4e 100%);
+    position: relative;
+    overflow: hidden;
+}
+
+.verdicta-auth-shell::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle, rgba(196, 147, 28, .35) 1px, transparent 1px);
+    background-size: 26px 26px;
+    opacity: .18;
+    pointer-events: none;
+}
+
+.verdicta-auth-grid {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 1fr 480px;
+    gap: 3rem;
+    width: 100%;
+    align-items: center;
+}
+
+@media (max-width: 1100px) {
+    .verdicta-auth-grid {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+    }
+
+    .verdicta-auth-brand-panel {
+        display: none;
+    }
+}
+
+.verdicta-auth-brand-panel {
+    color: #fff;
+    padding: 2rem;
+}
+
+.verdicta-auth-brand-content {
+    max-width: 600px;
+}
+
+.verdicta-auth-kicker {
+    display: block;
+    font-size: .8rem;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: #E5C15C;
+    margin-bottom: 1rem;
+    font-weight: 700;
+}
+
+.verdicta-auth-brand-panel h1 {
+    font-family: Georgia, 'Times New Roman', 'Nimbus Roman', serif;
+    font-size: clamp(2rem, 4vw, 3.2rem);
+    font-weight: 700;
+    line-height: 1.12;
+    margin-bottom: 1.25rem;
+}
+
+.verdicta-auth-brand-panel h1 span {
+    color: #E5C15C;
+}
+
+.verdicta-auth-brand-panel p {
+    color: rgba(255, 255, 255, .82);
+    font-size: 1.05rem;
+    max-width: 520px;
+    margin-bottom: 2rem;
+}
+
+.verdicta-auth-stat-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 2rem;
+}
+
+.verdicta-auth-stat-card {
+    background: rgba(255, 255, 255, .08);
+    border: 1px solid rgba(196, 147, 28, .25);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    min-width: 130px;
+    backdrop-filter: blur(6px);
+}
+
+.verdicta-auth-stat-card strong {
+    display: block;
+    color: #E5C15C;
+    font-family: Georgia, 'Times New Roman', 'Nimbus Roman', serif;
+    font-size: 1.3rem;
+    margin-bottom: .25rem;
+}
+
+.verdicta-auth-stat-card span {
+    display: block;
+    color: rgba(255, 255, 255, .72);
+    font-size: .78rem;
+    line-height: 1.3;
+}
+
+.verdicta-auth-trust-list {
+    display: flex;
+    flex-direction: column;
+    gap: .7rem;
+}
+
+.verdicta-auth-trust-list > div {
+    position: relative;
+    padding-left: 1.6rem;
+    color: rgba(255, 255, 255, .78);
+    font-size: .92rem;
+}
+
+.verdicta-auth-trust-list > div::before {
+    content: '\2713';
+    position: absolute;
+    left: 0;
+    color: #E5C15C;
+    font-weight: 700;
+}
+
+.verdicta-auth-form-panel {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.verdicta-auth-card {
+    width: 100%;
+    background: rgba(255, 255, 255, .97);
+    border: 1px solid rgba(196, 147, 28, .35);
+    border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(1, 18, 60, .35);
+}
+
+.verdicta-auth-logo img {
+    /* The supplied mark is 1024x1024 with a transparent background, so cap
+       it rather than let it dominate the card. */
+    max-height: 120px;
+    width: auto;
+    object-fit: contain;
+}
+
+.verdicta-auth-logo p {
+    color: #5a6472;
+    font-size: .92rem;
+}
+
+.verdicta-auth-submit {
+    background: #01123C;
+    border-color: #01123C;
+    color: #fff;
+    font-weight: 600;
+    letter-spacing: .02em;
+    width: 100%;
+}
+
+.verdicta-auth-submit:hover,
+.verdicta-auth-submit:focus {
+    background: #C4931C;
+    border-color: #C4931C;
+    color: #01123C;
+}
+
+/* The stock Odoo brand switcher sits on top of the dark shell. */
+.o_auth_brand {
+    display: none;
+}

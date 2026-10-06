@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!--
+        Verdicta invoice / credit-note branding.
+
+        Deliberately stylesheet-and-data only. Odoo 19's
+        account.report_invoice_document is rebuilt on a Bootstrap grid and its
+        legacy class hooks are gone, so replacing elements here would break on
+        the next core update. Instead:
+
+          1. the real mark lives on the company record, which
+             web.external_layout_standard already renders, and
+          2. this stylesheet restyles that layout's own classes.
+
+        Nothing is removed, so core updates keep working.
+    -->
+    <template id="brand_invoice" inherit_id="account.report_invoice_document"
+              name="Verdicta Brand - Invoice Styles">
+        <xpath expr="//t[@t-set='o']" position="after">
+            <style type="text/css">
+                /* Palette decoded from Verdicta Logo.png on 30 Sep 2026:
+                   dominant #01123C deep navy (h223 s97% l12%), accent
+                   #C4931C gold (h43 s75% l44%). Ramp sampled from the mark. */
+                :root {
+                    --vb-navy:#01123C; --vb-navy-700:#0A2458; --vb-navy-600:#123268;
+                    --vb-navy-500:#1B447F; --vb-navy-100:#E4EAF4; --vb-navy-050:#F4F7FB;
+                    --vb-gold:#C4931C; --vb-gold-600:#946305; --vb-gold-400:#D4A42B;
+                    --vb-gold-300:#E5C15C; --vb-gold-100:#FDF6E3;
+                    --vb-line:#C9D2E3; --vb-ink:#0B1220; --vb-muted:#5A6B7F;
+                }
+                body { color:var(--vb-ink);
+                       font-family:"Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+
+                /* ---- header: logo, wordmark, tagline ---- */
+                .header { border-bottom:2.4pt solid var(--vb-navy) !important;
+                          padding-bottom:6pt; }
+                .o_company_logo_small { height:46pt !important; width:46pt !important;
+                                        object-fit:contain; }
+                .o_company_tagline { color:var(--vb-gold-600) !important;
+                                     letter-spacing:.09em; text-transform:uppercase;
+                                     font-size:7.6pt !important; }
+                .header [name="company_address"] li { color:var(--vb-muted);
+                        font-size:7.4pt; line-height:1.5; }
+
+                /* ---- document title ---- */
+                h2 { color:var(--vb-navy) !important; font-weight:300 !important;
+                     letter-spacing:.06em; text-transform:uppercase;
+                     font-size:19pt !important; }
+
+                /* ---- line items ---- */
+                table.o_main_table { border-collapse:collapse; }
+                table.o_main_table thead th,
+                table.o_main_table th.o_main_table_caption {
+                    background:var(--vb-navy) !important; color:#fff !important;
+                    border:0 !important; font-size:7.2pt; font-weight:700;
+                    letter-spacing:.05em; text-transform:uppercase;
+                    padding:5pt 6pt !important;
+                    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+                }
+                table.o_main_table tbody td { font-size:8.5pt;
+                        border-bottom:.5pt solid var(--vb-line) !important;
+                        padding:4.5pt 6pt !important; }
+                table.o_main_table tbody tr.o_line_section { background:var(--vb-navy-050); }
+                table.o_main_table tbody td.o_line_name { font-weight:600; }
+
+                /* ---- totals ---- */
+                table.o_total_table { width:100%; border-collapse:collapse; }
+                table.o_total_table td { font-size:8.6pt; padding:3.5pt 6pt !important; }
+                table.o_total_table tr.o_total:last-child td,
+                table.o_total_table tr.o_total .border-black {
+                    background:var(--vb-navy-050) !important;
+                    border-top:1.2pt solid var(--vb-navy) !important;
+                    border-bottom:0 !important; font-weight:700;
+                    color:var(--vb-navy) !important; font-size:10.5pt;
+                    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+                }
+
+                /* ---- payment terms: the gold callout ---- */
+                #total_payment_term_details_table { margin-top:8pt; }
+                #total_payment_term_details_table table,
+                #total_payment_term_details_table td {
+                    background:var(--vb-gold-100) !important; border:0 !important;
+                    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+                }
+                #total_payment_term_details_table td:first-child {
+                    border-left:2.4pt solid var(--vb-gold) !important;
+                    font-weight:700; color:var(--vb-gold-600); width:34%;
+                }
+
+                /* ---- paid / due badges, wherever core renders them ---- */
+                .o_invoice_paid_label, .o_invoice_due_label,
+                .o_paid_label, .o_due_label {
+                    background:var(--vb-gold) !important; color:#fff !important;
+                    font-weight:700; letter-spacing:.06em; border-radius:2pt;
+                    padding:2.5pt 8pt; display:inline-block;
+                    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+                }
+
+                /* ---- notes ---- */
+                [name="taxes_legal_notes"], .o_invoice_notes { font-size:7.8pt;
+                        color:var(--vb-muted); line-height:1.55; }
+
+                /* ---- footer ---- */
+                .footer { border-top:1.2pt solid var(--vb-navy) !important;
+                          margin-top:12pt; padding-top:6pt; font-size:7pt;
+                          color:var(--vb-muted); }
+                .footer b { color:var(--vb-navy); }
+
+                @page { margin:12mm 12mm 16mm 12mm; }
+            </style>
+        </xpath>
+    </template>
+
+</odoo>

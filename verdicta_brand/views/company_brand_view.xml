@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_company_form_brand" model="ir.ui.view">
+        <field name="name">res.company.form.brand</field>
+        <field name="model">res.company</field>
+        <field name="inherit_id" ref="base.view_company_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//sheet" position="inside">
+                <div class="oe_title">
+                    <h2>Verdicta brand</h2>
+                </div>
+                <group string="Letterhead used on invoices and PDFs">
+                    <group>
+                        <field name="report_header"
+                               placeholder="Shown under the logo on every document."/>
+                        <field name="external_report_layout_id"/>
+                    </group>
+                    <group>
+                        <div style="font-size:12px;">
+                            <p class="text-muted">
+                                Invoices, credit notes and vendor bills are styled
+                                with the navy and gold palette decoded from the
+                                logo: <b>#01123C</b> navy, <b>#C4931C</b> gold. The
+                                mark itself lives on this company record, so it
+                                appears in the backend and on every printed
+                                document.
+                            </p>
+                            <button name="action_reapply_brand" type="object"
+                                    class="btn-outline-primary"
+                                    string="Re-apply brand defaults"/>
+                        </div>
+                    </group>
+                </group>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

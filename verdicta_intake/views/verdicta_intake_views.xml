@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_verdicta_intake_list" model="ir.ui.view">
+        <field name="name">verdicta.intake.list</field>
+        <field name="model">verdicta.intake</field>
+        <field name="arch" type="xml">
+            <list string="Client submissions" decoration-muted="state == 'closed'">
+                <field name="reference"/>
+                <field name="practice_name"/>
+                <field name="contact_name"/>
+                <field name="contact_email" optional="show"/>
+                <field name="submit_count" string="Saves"/>
+                <field name="outstanding_required" string="Outstanding"/>
+                <field name="progress_pct" widget="progressbar"/>
+                <field name="state" widget="badge"
+                       decoration-success="state == 'closed'"
+                       decoration-info="state == 'submitted'"/>
+                <field name="last_submitted_at" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_verdicta_intake_form" model="ir.ui.view">
+        <field name="name">verdicta.intake.form</field>
+        <field name="model">verdicta.intake</field>
+        <field name="arch" type="xml">
+            <form string="Client submission">
+                <header>
+                    <button name="action_send_invite" type="object" class="btn-primary"
+                            string="Send invite" invisible="state != 'draft'"/>
+                    <button name="action_send_acknowledgement" type="object"
+                            string="Re-send receipt" invisible="state == 'draft'"/>
+                    <button name="action_notify_sgc" type="object"
+                            string="Email to accounting desk"/>
+                    <button name="action_reopen" type="object" string="New access code"
+                            confirm="Issue a new private link? The old link will stop working."
+                            groups="verdicta_intake.group_verdicta_intake_manager"/>
+                    <button name="action_close" type="object" string="Close"
+                            invisible="state == 'closed'"/>
+                    <button name="action_reopen_record" type="object" string="Reopen"
+                            invisible="state != 'closed'"/>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="draft,submitted,closed"/>
+                </header>
+
+                <sheet>
+                    <div class="alert alert-warning" role="alert" style="margin-bottom:12px;">
+                        <b>Confidential client data.</b> The access code below
+                        opens this client's form and nothing else. Share it only
+                        with the client, by email.
+                    </div>
+
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_generate_pdf" type="object"
+                                class="oe_stat_button" icon="fa-file-pdf-o">
+                            <field name="pdf_attachment_id" widget="statinfo" string="PDF"/>
+                        </button>
+                    </div>
+
+                    <div class="oe_title">
+                        <h1><field name="reference" readonly="1"/></h1>
+                    </div>
+
+                    <group>
+                        <group string="Client">
+                            <field name="practice_name"/>
+                            <field name="contact_name"/>
+                            <field name="contact_email" widget="email"/>
+                            <field name="contact_phone"/>
+                            <field name="period_start"/>
+                            <field name="period_end"/>
+                        </group>
+                        <group string="Access">
+                            <field name="access_code" readonly="1"/>
+                            <field name="invited_at" readonly="1"/>
+                            <field name="submitted_at" readonly="1"/>
+                            <field name="last_submitted_at" readonly="1"/>
+                            <field name="submit_count" readonly="1"/>
+                            <field name="last_submit_ip" readonly="1"/>
+                            <field name="notified"/>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                        </group>
+                    </group>
+
+                    <group string="Progress">
+                        <field name="progress_pct" widget="progressbar"/>
+                        <field name="outstanding_required"/>
+                    </group>
+
+                    <notebook>
+                        <page string="Answers" name="answers">
+                            <field name="answer_ids" readonly="1" nolabel="1">
+                                <list string="Answers">
+                                    <field name="submit_no" string="#"/>
+                                    <field name="section"/>
+                                    <field name="question_label"/>
+                                    <field name="value"/>
+                                    <field name="answered_at"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Still outstanding" name="outstanding">
+                            <field name="open_question_ids" nolabel="1" readonly="1">
+                                <list string="Outstanding">
+                                    <field name="section"/>
+                                    <field name="label"/>
+                                    <field name="required"/>
+                                    <field name="field_type"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Signature" name="signature">
+                        <group>
+                        <group string="Signed by the client">
+                        <field name="is_signed"/>
+                        <field name="client_signer_name"/>
+                        <field name="client_signer_role"/>
+                        <field name="client_sign_date"/>
+                        <field name="authority_confirmed"/>
+                        <field name="signed_on"/>
+                        <field name="signature_ip"/>
+                        </group>
+                        <group string="Seal and countersignature">
+                        <field name="signing_digest"/>
+                        <field name="signed_answer_count"/>
+                        <field name="provider_signer_name"/>
+                        <field name="provider_sign_date"/>
+                        <field name="signature" widget="image" options="{'size': [3, 1]}"/>
+                        <button name="action_clear_signature" type="object" string="Clear signature"
+                        confirm="Remove the signature so the client can sign again?"/>
+                        </group>
+                        </group>
+                        </page>
+                        <page string="Internal note" name="note">
+                            <field name="note" nolabel="1" placeholder="Only the Verdicta / SGC team sees this."/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_verdicta_intake_search" model="ir.ui.view">
+        <field name="name">verdicta.intake.search</field>
+        <field name="model">verdicta.intake</field>
+        <field name="arch" type="xml">
+            <search string="Submissions">
+                <field name="practice_name"/>
+                <field name="contact_name"/>
+                <field name="contact_email"/>
+                <field name="reference"/>
+                <filter name="draft" string="Invited" domain="[('state','=','draft')]"/>
+                <filter name="submitted" string="Submitted" domain="[('state','=','submitted')]"/>
+                <filter name="closed" string="Complete" domain="[('state','=','closed')]"/>
+                <separator/>
+                <filter name="outstanding" string="Has outstanding items"
+                        domain="[('outstanding_required','&gt;',0)]"/>
+                <separator/>
+                <filter name="group_state" string="Group by: Status" context="{'group_by': 'state'}"/>
+                <filter name="group_client" string="Group by: Client" context="{'group_by': 'contact_name'}"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_verdicta_intake" model="ir.actions.act_window">
+        <field name="name">Submissions</field>
+        <field name="res_model">verdicta.intake</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">No client submissions yet</p>
+            <p>Create one, then use <b>Send invite</b> to email the client
+               their private link to the form.</p>
+        </field>
+    </record>
+
+    <!-- ====================== questions ====================== -->
+    <record id="action_verdicta_question_root" model="ir.actions.act_window">
+        <field name="name">Questions</field>
+        <field name="res_model">verdicta.question</field>
+        <field name="view_mode">list,form,kanban</field>
+        <field name="search_view_id" ref="verdicta_intake.view_verdicta_question_list"/>
+    </record>
+
+    <!-- ====================== the client form ====================== -->
+    <record id="action_client_form" model="ir.actions.act_window">
+        <field name="name">Client form</field>
+        <field name="res_model">verdicta.question</field>
+        <field name="view_mode">list,form,kanban</field>
+        <field name="domain">[('state','=','open')]</field>
+        <field name="context">{'search_default_open': 1}</field>
+    </record>
+
+</odoo>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="ir_cron_purge_attempts" model="ir.cron">
+        <field name="name">Verdicta Intake: purge access attempts</field>
+        <field name="model_id" ref="model_verdicta_attempt"/>
+        <field name="state">code</field>
+        <field name="code">model.cron_purge_expired()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="active" eval="True"/>
+        <field name="user_id" ref="base.user_root"/>
+    </record>
+
+    <record id="ir_cron_notify_new_questions" model="ir.cron">
+        <field name="name">Verdicta Intake: tell clients about new questions</field>
+        <field name="model_id" ref="model_verdicta_intake"/>
+        <field name="state">code</field>
+        <field name="code">model.cron_notify_new_questions()</field>
+        <field name="interval_number">30</field>
+        <field name="interval_type">minutes</field>
+        <field name="active" eval="True"/>
+        <field name="user_id" ref="base.user_root"/>
+    </record>
+</odoo>

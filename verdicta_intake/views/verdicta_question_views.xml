@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_verdicta_question_list" model="ir.ui.view">
+        <field name="name">verdicta.question.list</field>
+        <field name="model">verdicta.question</field>
+        <field name="arch" type="xml">
+            <list string="Intake questions" default_order="section, display_order, id"
+                  decoration-muted="state == 'retired'"
+                  decoration-success="state == 'resolved'">
+                <field name="section"/>
+                <field name="display_order" widget="handle"/>
+                <field name="label"/>
+                <field name="field_type"/>
+                <field name="required" string="Req"/>
+                <field name="auto_close" string="Keep"/>
+                <field name="answered_count" optional="show"/>
+                <field name="last_answered_at" optional="hide"/>
+                <field name="state" widget="badge"
+                       decoration-success="state == 'resolved'"
+                       decoration-danger="state == 'retired'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_verdicta_question_form" model="ir.ui.view">
+        <field name="name">verdicta.question.form</field>
+        <field name="model">verdicta.question</field>
+        <field name="arch" type="xml">
+            <form string="Question">
+                <header>
+                    <button name="action_open" type="object" string="Show on form"
+                            invisible="state == 'open'"/>
+                    <button name="action_resolve" type="object" string="Hide (answered)"
+                            invisible="state != 'open'"/>
+                    <button name="action_retire" type="object" string="Retire"
+                            confirm="Retire this question? It will be removed from every client's form. Existing answers are kept."
+                            invisible="state == 'retired'"/>
+                    <button name="action_restore" type="object" string="Restore"
+                            invisible="state != 'retired'"/>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="open,resolved,retired"/>
+                </header>
+
+                <sheet>
+                    <div class="alert alert-info" role="alert" style="margin-bottom:12px;">
+                    These questions drive the client form. Edit them here and
+                    save — no deploy needed. Answering a question removes it
+                    from the form automatically unless <b>Keep after answer</b>
+                    is ticked.
+                    </div>
+
+                    <group>
+                        <group string="What the client sees">
+                            <field name="section"/>
+                            <field name="display_order"/>
+                            <field name="label" placeholder="e.g. Total staff on payroll"/>
+                            <field name="name" placeholder="e.g. How many people are on your payroll, including yourself?"/>
+                            <field name="field_type"/>
+                            <field name="required"/>
+                            <field name="auto_close"/>
+                        </group>
+                        <group string="Guidance">
+                            <field name="help_text"
+                                   placeholder="Small print shown under the box, or the placeholder inside it."/>
+                            <field name="known_label" placeholder="e.g. Our records show"/>
+                            <field name="known_value"/>
+                            <field name="known_is_amount" invisible="not known_label"/>
+                        </group>
+                    </group>
+
+                    <group string="Options" invisible="field_type not in ('select','multiselect','checkbox')">
+                        <field name="options" nolabel="1" placeholder="One option per line"/>
+                    </group>
+
+                    <group string="Internal only">
+                        <field name="internal_note" placeholder="Never shown to the client or on their PDF."/>
+                    </group>
+
+                    <group string="History">
+                        <field name="answered_count"/>
+                        <field name="last_answered_at"/>
+                        <field name="active" invisible="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_verdicta_question_kanban" model="ir.ui.view">
+        <field name="name">verdicta.question.kanban</field>
+        <field name="model">verdicta.question</field>
+        <field name="arch" type="xml">
+            <kanban default_group_by="section" sample="1">
+                <field name="state"/>
+                <templates>
+                    <t t-name="card">
+                        <div class="o_kanban_global_click">
+                            <div class="fw-bold"><field name="label"/></div>
+                            <div class="text-muted"><field name="field_type"/></div>
+                            <div t-if="answered_count">
+                                Answered <field name="answered_count"/>×
+                            </div>
+                            <div t-if="known_label" class="text-muted">
+                                <field name="known_label"/>
+                            </div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <record id="view_verdicta_question_search" model="ir.ui.view">
+        <field name="name">verdicta.question.search</field>
+        <field name="model">verdicta.question</field>
+        <field name="arch" type="xml">
+            <search string="Questions">
+                <field name="label" string="Question"/>
+                <field name="name" string="Wording"/>
+                <filter name="open" string="On the form" domain="[('state','=','open')]"/>
+                <filter name="resolved" string="Answered" domain="[('state','=','resolved')]"/>
+                <filter name="retired" string="Retired" domain="[('state','=','retired')]"/>
+                <separator/>
+                <filter name="required" string="Required" domain="[('required','=',True)]"/>
+                <separator/>
+                <filter name="group_state" string="Group by: Status" context="{'group_by': 'state'}"/>
+                <filter name="group_section" string="Group by: Section" context="{'group_by': 'section'}"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_verdicta_question" model="ir.actions.act_window">
+        <field name="name">Questions</field>
+        <field name="res_model">verdicta.question</field>
+        <field name="view_mode">list,form,kanban</field>
+        <field name="search_view_id" ref="view_verdicta_question_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Start asking</p>
+            <p>Add the questions Verdicta still needs answered. They appear on
+               the client form immediately.</p>
+        </field>
+    </record>
+
+</odoo>

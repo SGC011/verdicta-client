@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+        Verdicta Auth Branding.
+
+        Auth-only extract of the SGC tenant theme (sgc_theme_aurum): the login /
+        signup / reset treatment, retitled for Verdicta Legal Consultant. It
+        deliberately ships none of the tenant's marketing pages and no
+        industry imagery, so nothing real-estate or construction related is
+        published on the Verdicta site.
+
+        The centred logo block reads /web/binary/company_logo, so the mark set
+        by verdicta_brand on the company partner is picked up automatically.
+    -->
+
+    <template id="verdicta_login_layout"
+              inherit_id="website.login_layout"
+              name="Verdicta Login Layout"
+              priority="99">
+        <xpath expr="//div[hasclass('oe_website_login_container')]" position="replace">
+            <!-- Served straight from static/ rather than through an asset
+                 bundle: on this Odoo 19 build the manifest "assets" entry for
+                 this module never reached ir_asset, so the bundle served the
+                 page unstyled. website.login_layout has no <head> of its own
+                 (it is produced by a t-call), so the link goes here. -->
+            <link rel="stylesheet" type="text/css"
+                  href="/verdicta_auth/static/src/css/verdicta_auth.css"/>
+            <div class="container verdicta-auth-shell py-5">
+                <div class="verdicta-auth-grid">
+                    <section class="verdicta-auth-brand-panel" aria-label="Verdicta Legal Consultant">
+                        <div class="verdicta-auth-brand-content">
+                            <span class="verdicta-auth-kicker">Verdicta Legal Consultant</span>
+                            <h1>Confidential client intake, <span>secured by design</span></h1>
+                            <p>Submit your matter details through a private access link, and keep every
+                               response on file for your engagement.</p>
+
+                            <div class="verdicta-auth-stat-row">
+                                <div class="verdicta-auth-stat-card">
+                                    <strong>Private</strong>
+                                    <span>Per-client access code</span>
+                                </div>
+                                <div class="verdicta-auth-stat-card">
+                                    <strong>Dubai</strong>
+                                    <span>UAE legal practice</span>
+                                </div>
+                                <div class="verdicta-auth-stat-card">
+                                    <strong>Tracked</strong>
+                                    <span>Every submission logged</span>
+                                </div>
+                            </div>
+
+                            <div class="verdicta-auth-trust-list">
+                                <div>Each client receives their own private access link</div>
+                                <div>Responses are recorded in Verdicta's Odoo workspace</div>
+                                <div>Submissions are summarised into a dated PDF record</div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="verdicta-auth-form-panel">
+                        <div t-attf-class="card border-0 mx-auto verdicta-auth-card {{login_card_classes or ''}} o_database_list">
+                            <div class="card-body">
+                                <div class="verdicta-auth-logo text-center pb-3 border-bottom mb-4">
+                                    <img t-attf-src="/web/binary/company_logo{{ '?dbname='+db if db else '' }}"
+                                         alt="Verdicta Legal Consultant logo"
+                                         style="max-height:120px; max-width: 100%; width:auto"/>
+                                    <p class="mb-0 mt-3">Sign in to your secure client workspace.</p>
+                                </div>
+
+                                <t t-out="0"/>
+
+                                <div class="text-center small mt-4 pt-3 border-top" t-if="not disable_footer">
+                                    <a href="https://www.verdictalegalconsultant.ae"
+                                       target="_blank" rel="noopener">www.verdictalegalconsultant.ae</a>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </xpath>
+    </template>
+
+    <template id="verdicta_login_form" inherit_id="web.login" name="Verdicta Login Form Copy">
+        <xpath expr="//label[@for='login']" position="replace">
+            <label for="login" class="form-label">Email address</label>
+        </xpath>
+        <xpath expr="//input[@id='login']" position="attributes">
+            <attribute name="placeholder">name@example.com</attribute>
+        </xpath>
+        <xpath expr="//label[@for='password']" position="replace">
+            <label for="password" class="form-label">Password</label>
+        </xpath>
+        <xpath expr="//input[@id='password']" position="attributes">
+            <attribute name="placeholder">Enter your password</attribute>
+        </xpath>
+        <xpath expr="//button[@type='submit' and not(@name)]" position="replace">
+            <button type="submit" class="btn btn-primary verdicta-auth-submit">Sign in</button>
+        </xpath>
+    </template>
+
+    <template id="verdicta_signup_form" inherit_id="auth_signup.signup" name="Verdicta Signup Copy">
+        <xpath expr="//label[@for='name']" position="replace">
+            <label for="name" class="form-label">Full name</label>
+        </xpath>
+        <xpath expr="//input[@id='name']" position="attributes">
+            <attribute name="placeholder">Your full name</attribute>
+        </xpath>
+        <xpath expr="//div[hasclass('field-login')]//label[@for='login']" position="replace">
+            <label for="login" class="form-label">Email address</label>
+        </xpath>
+        <xpath expr="//div[hasclass('field-login')]//input[@id='login']" position="attributes">
+            <attribute name="placeholder">name@example.com</attribute>
+        </xpath>
+        <xpath expr="//button[@type='submit']" position="replace">
+            <button type="submit" class="btn btn-primary verdicta-auth-submit mb-1">Create account</button>
+        </xpath>
+    </template>
+
+    <template id="verdicta_signup_fields" inherit_id="auth_signup.fields" name="Verdicta Signup Fields Copy">
+        <xpath expr="//label[@for='password']" position="replace">
+            <label for="password" class="form-label">Create password</label>
+        </xpath>
+        <xpath expr="//input[@id='password']" position="attributes">
+            <attribute name="placeholder">At least 8 characters</attribute>
+        </xpath>
+        <xpath expr="//label[@for='confirm_password']" position="replace">
+            <label for="confirm_password" class="form-label">Confirm password</label>
+        </xpath>
+        <xpath expr="//input[@id='confirm_password']" position="attributes">
+            <attribute name="placeholder">Re-enter your password</attribute>
+        </xpath>
+    </template>
+
+    <template id="verdicta_reset_form" inherit_id="auth_signup.reset_password" name="Verdicta Reset Copy">
+        <xpath expr="//div[hasclass('field-login')]//label[@for='login']" position="replace">
+            <label for="login" class="col-form-label">Email address</label>
+        </xpath>
+        <xpath expr="//div[hasclass('field-login')]//input[@id='login']" position="attributes">
+            <attribute name="placeholder">name@example.com</attribute>
+        </xpath>
+        <xpath expr="//button[@type='submit']" position="replace">
+            <button type="submit" class="btn btn-primary verdicta-auth-submit">Reset access</button>
+        </xpath>
+    </template>
+</odoo>

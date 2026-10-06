@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="mail_template_nudge" model="mail.template">
+        <field name="name">Verdicta Intake: items still needed</field>
+        <field name="model_id" ref="model_verdicta_intake"/>
+        <field name="subject">Action needed: {{ object.outstanding_required }} item(s) still open on your intake form ({{ object.reference or '' }})</field>
+        <field name="email_from">SGC TECH AI &lt;info@sgctech.ai&gt;</field>
+        <field name="email_to">{{ object.contact_email }}</field>
+        <field name="email_cc">bran@sgctech.ai</field>
+        <field name="use_default_to">False</field>
+        <field name="auto_delete" eval="True"/>
+        <field name="body_html" type="html">
+            <div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#1B2733;line-height:1.6;max-width:640px;">
+                <p>Hello <t t-out="object.contact_name or 'there'"/>,</p>
+
+                <p>Your intake form for <b><t t-out="object.practice_name or object.company_id.name or ''"/></b>
+                   is open and waiting on <b><t t-out="object.outstanding_required"/> required item(s)</b>.
+                   We cannot start the reconciliation until these are in.</p>
+
+                <ul style="margin:8px 0 14px 0;padding-left:20px;">
+                    <li t-foreach="object._outstanding_questions()" t-as="q">
+                        <t t-out="q.label or q.name"/>
+                    </li>
+                </ul>
+
+                <p t-if="object._missing_required_documents()">
+                    We also still need your <b>bank statements</b> - nothing can be
+                    reconciled without them. Please add them in the
+                    <b>Bank statements</b> box on the form.
+                </p>
+
+                <p>Each time you save, please sign the form: your signature is
+                   stamped on the record and on that set of answers, so we can
+                   show exactly who sent what. If you save without changing
+                   anything, nothing is sent.</p>
+
+                <p style="margin:16px 0;">
+                    <a t-att-href="object.get_base_url() + '/onboarding/' + object.access_code"
+                       style="background:#01123C;color:#fff;text-decoration:none;padding:10px 18px;border-radius:3px;display:inline-block;">
+                        Open your form</a>
+                    <span style="font-size:12px;color:#5A6B7F;">Your private link is unchanged.</span>
+                </p>
+
+                <p>If anything above is unclear, or you would rather send a
+                   document by email, just reply to this message.</p>
+
+                <p style="font-size:12px;color:#5A6B7F;">
+                    Renbran Madelo &#183; SGC TECH AI
+                    <br/>Reference <t t-out="object.reference or ''"/>
+                </p>
+            </div>
+        </field>
+    </record>
+
+</odoo>
